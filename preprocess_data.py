@@ -1,3 +1,5 @@
+import re
+
 from ekphrasis.classes.preprocessor import TextPreProcessor
 import numpy as np
 from ekphrasis.classes.tokenizer import SocialTokenizer
@@ -6,9 +8,7 @@ from ekphrasis.dicts.emoticons import emoticons
 from bert_repo.run_classifier import InputExample
 
 
-def preprocessing_data(sentences, labels):
-
-
+def ekphrasis_preprocess(s):
     text_processor = TextPreProcessor(
         # terms that will be normalized
         normalize=['url', 'email', 'user', 'percent', 'money', 'phone', 'time', 'date', 'number'],
@@ -24,53 +24,45 @@ def preprocessing_data(sentences, labels):
         dicts=[emoticons]
     )
 
-    # PREPROCESS TRAINING AND TEST DATA
-    def func(row):
-        if row == 'POS':
-            return 1
-        elif row == 'NEG':
-            return 0
+    s = s.lower()
+    s = str(" ".join(text_processor.pre_process_doc(s)))
+    s = re.sub(r"[^a-zA-ZÀ-ú</>!?♥♡\s\U00010000-\U0010ffff]", ' ', s)
+    s = re.sub(r"\s+", ' ', s)
+    s = re.sub(r'(\w)\1{2,}', r'\1\1', s)
+    s = re.sub(r'^\s', '', s)
+    s = re.sub(r'\s$', '', s)
+    return s
 
-    # final examples training
-    sentences_filtered = []
-    labels = list(map(lambda x: func(x), labels))
 
-    import re
-    i = 0
-    for s in sentences:
-        s = s.lower()
-        s = str(" ".join(text_processor.pre_process_doc(s)))
-        s = re.sub(r"[^a-zA-ZÀ-ú</>!?♥♡\s\U00010000-\U0010ffff]", ' ', s)
-        s = re.sub(r"\s+", ' ', s)
-        s = re.sub(r'(\w)\1{2,}', r'\1\1', s)
-        s = re.sub(r'^\s', '', s)
-        s = re.sub(r'\s$', '', s)
-        # print(s)
-        sentences_filtered.append([labels[i], s])
-        i = i + 1
+def convert_single_string_to_input_dict(tokenizer, example_string, max_seq_length):
 
-    sentences_filtered = np.array(sentences_filtered)
-    np.random.shuffle(sentences_filtered)
-    split = int(len(sentences_filtered) * 0.8)
+    token_a = tokenizer.tokenize(example_string)
 
-    sentences_filtered_train, sentences_filtered_test = sentences_filtered[:split], sentences_filtered[split:]
+    tokens = []
+    segments_ids = []
+    segment_ids = []
 
-    f = lambda x: InputExample(guid=None,  # Globally unique ID for bookkeeping, unused in this example
-                               text_a=x[1],
-                               text_b=None,
-                               label=int(x[0]))
+    tokens.append("[CLS]")
+    segment_ids.append(0)
+    for token in token_a:
+        tokens.append(token)
+        segment_ids.append(0)
 
-    f2 = lambda x: InputExample(guid=None,  # Globally unique ID for bookkeeping, unused in this example
-                                text_a=x[1],
-                                text_b=None,
-                                label=0)
+    tokens.append('[SEP]')
+    segment_ids.append(0)
 
-    train_examples = map(f, sentences_filtered_train)
-    train_examples = list(train_examples)
-    train_examples = np.array(train_examples)
+    input_ids = tokenizer.convert_tokens_to_ids(tokens)
+    input_mask = [1] * len(input_ids)
 
-    test_examples = map(f2, sentences_filtered_test)
-    test_examples = list(test_examples)
-    test_examples = np.array(test_examples)
+    while len(input_ids) < max_seq_length:
+        input_ids.append(0)
+        input_mask.append(0)
+        segment_ids.append(0)
 
-    return train_examples, test_examples
+    label_id = [0]
+    padding = [0] * max_seq_length
+    print(len(input_ids), len(input_mask), len(segment_ids), len(label_id))
+    return {"input_ids": [input_ids, padding], "input_mask": [input_mask, padding],
+            "segment_ids": [segment_ids, padding], "label_ids": label_id}
+
+
